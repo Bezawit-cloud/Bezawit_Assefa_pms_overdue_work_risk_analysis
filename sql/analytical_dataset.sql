@@ -1,0 +1,57 @@
+-- ============================================================
+-- TASK-LEVEL ANALYTICAL DATASET
+-- Must return exactly ONE ROW PER TASK.
+-- Document every join decision as a comment right above the join.
+-- ============================================================
+
+-- Decisions to make explicit before writing this query:
+-- 1. Which department wins when task.department_id != position.department_id?
+--    -> pick one rule (e.g. position's department is authoritative because
+--       it reflects org structure) and document why.
+-- 2. If a task has multiple positions/employees over time, which one
+--    represents it in a single row? (e.g. most recent, or current position)
+-- 3. History tables: use the CURRENT row for the dataset, but derive
+--    "number of task revisions" as a count from the history table.
+-- 4. KSI linked to multiple goals, KPI linked to multiple milestones, etc:
+--    aggregate (e.g. STRING_AGG) rather than join-and-fan-out, OR pick a
+--    single canonical parent and document the rule.
+
+-- WITH task_base AS (
+--     SELECT t.id AS task_id, t.name AS task_name, ...
+--     FROM tasks_task t
+--     LEFT JOIN tasks_major_activity ma ON ...
+--     ...
+-- ),
+-- subtask_agg AS (
+--     SELECT task_id,
+--            COUNT(*) AS num_subtasks,
+--            SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) AS num_completed_subtasks
+--     FROM tasks_sub_task
+--     GROUP BY task_id
+-- ),
+-- revision_count AS (
+--     SELECT task_id, COUNT(*) AS num_revisions
+--     FROM tasks_task_history
+--     GROUP BY task_id
+-- )
+-- SELECT
+--     tb.*,
+--     COALESCE(sa.num_subtasks, 0) AS num_subtasks,
+--     COALESCE(sa.num_completed_subtasks, 0) AS num_completed_subtasks,
+--     CASE WHEN sa.num_subtasks > 0
+--          THEN sa.num_completed_subtasks::float / sa.num_subtasks
+--          ELSE NULL END AS subtask_completion_pct,
+--     COALESCE(rc.num_revisions, 0) AS num_revisions,
+--     -- independent overdue calculation (must match data_quality_checks.sql logic)
+--     CASE
+--         WHEN tb.status = 'completed' AND tb.actual_end_date > tb.planned_end_date THEN TRUE
+--         WHEN tb.status <> 'completed' AND tb.planned_end_date < CURRENT_DATE THEN TRUE
+--         ELSE FALSE
+--     END AS calculated_overdue
+-- FROM task_base tb
+-- LEFT JOIN subtask_agg sa ON sa.task_id = tb.task_id
+-- LEFT JOIN revision_count rc ON rc.task_id = tb.task_id;
+
+-- After writing the real query, ALWAYS verify:
+-- SELECT task_id, COUNT(*) FROM (<query above>) x GROUP BY task_id HAVING COUNT(*) > 1;
+-- This must return zero rows.
